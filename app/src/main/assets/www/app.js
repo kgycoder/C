@@ -56,7 +56,9 @@ function triggerBeat() {
 let _beatTimer = null;
 function startBeatTimer(bpm = 120) {
     clearInterval(_beatTimer);
-    _beatTimer = setInterval(() => { if (BG.playing) triggerBeat(); }, 60000 / bpm);
+    // 박자는 전체화면 플레이어(NP)의 메시/펄스에만 쓰인다. 카드·배경은 더 이상 박자에 반응하지 않으므로
+    // NP 가 닫혀 있거나 백그라운드일 때는 타이머가 아무 일도 하지 않게 한다.
+    _beatTimer = setInterval(() => { if (BG.playing && !window.__bgMode && _npIsOpen()) triggerBeat(); }, 60000 / bpm);
 }
 function stopBeatTimer() { clearInterval(_beatTimer); _beatTimer = null; }
 
@@ -75,50 +77,43 @@ function bgLoop() {
     BG.energyLevel += (BG.tEnergyLevel - BG.energyLevel) * .03;
     if (BG.beat > 0) BG.beat = Math.max(0, BG.beat - BG.beatDecay * (1 + BG.energyLevel));
 
-    const beat = BG.beat, en = BG.energyLevel;
+    // 배경은 박자에 반응하지 않는다(밝게 깜빡이는 효과 제거). 박자(BG.beat)는 NP 플레이어 전용.
+    const en = BG.energyLevel;
 
-    // 상태/오브 이동은 매 프레임 그대로 진행 → 움직이는 속도·박자 반응은 이전과 동일
-    const speed = 1 + BG.e * 1.4 + beat * (1.5 + en * 3.5);
+    const speed = 1 + BG.e * 1.4;
     BG.orbs.forEach(o => {
         o.x += o.vx * speed; o.y += o.vy * speed;
         if (o.x < -o.r) o.x = BG_W + o.r; if (o.x > BG_W + o.r) o.x = -o.r;
         if (o.y < -o.r) o.y = BG_H + o.r; if (o.y > BG_H + o.r) o.y = -o.r;
     });
 
-    // 실제 그리기는 2프레임에 1번(30fps). 매 프레임 전체 화면을 다시 그리면 WebView 합성과
-    // 네이티브 글래스(배경 캡처·블러)까지 60fps 로 다시 계산되어 시간이 지날수록 부하/발열이 커진다.
-    // 일시정지 중에는 오브 이동이 프레임당 1px 미만이고 위에 blur(120px) 오버레이가 덮여 있어 10fps 로도 구분이 안 된다.
-    if (BG.f % (BG.playing ? 2 : 6)) return;
+    // 실제 그리기는 느리게(재생 중 15fps / 정지 5fps). 배경 캔버스가 바뀔 때마다 WebView 합성과
+    // 네이티브 글래스(배경 캡처·블러·굴절)가 다시 계산되므로, 보이는 차이가 없는 선에서 갱신 빈도를 최소화한다.
+    // (오브 이동은 프레임당 1px 미만이라 이 정도 갱신으로도 끊겨 보이지 않는다.)
+    if (BG.f % (BG.playing ? 4 : 12)) return;
+    if (document.hidden) return;
     // 전체화면 플레이어(#np, 불투명)가 덮고 있는 동안엔 보이지 않으므로 그리지 않는다.
     if (_npIsOpen()) return;
 
     CX.clearRect(0, 0, BG_W, BG_H);
 
     const cx = BG_W / 2, cy = BG_H / 2;
-    const baseL = BG.playing ? 3 + beat * 5 : 1.5;
-    const g = CX.createRadialGradient(cx, cy, 0, cx, cy, BG_W * (.80 + beat * .20));
+    const baseL = BG.playing ? 3 : 1.5;
+    const g = CX.createRadialGradient(cx, cy, 0, cx, cy, BG_W * .80);
     g.addColorStop(0, `hsl(${BG.h},${16 + en * 14}%,${baseL + 1}%)`);
     g.addColorStop(1, `hsl(${BG.h + 40},${10 + en * 8}%,${baseL - 1}%)`);
     CX.fillStyle = g; CX.fillRect(0, 0, BG_W, BG_H);
 
     BG.orbs.forEach(o => {
-        const pulse = Math.sin(BG.f * .007 + o.phase) * .18 + beat * .40;
+        const pulse = Math.sin(BG.f * .007 + o.phase) * .18;
         const r = o.r * (1 + pulse);
         const og = CX.createRadialGradient(o.x, o.y, 0, o.x, o.y, r);
         const h = (BG.h + o.h) % 360;
-        const alpha = (o.a * (BG.playing ? .60 : .28)) + beat * o.a * 1.1;
-        og.addColorStop(0, `hsla(${h},${68 + beat * 22}%,${52 + beat * 14}%,${Math.min(alpha, .95)})`);
+        const alpha = o.a * (BG.playing ? .60 : .28);
+        og.addColorStop(0, `hsla(${h},68%,52%,${Math.min(alpha, .95)})`);
         og.addColorStop(1, `hsla(${h},68%,52%,0)`);
         CX.fillStyle = og; CX.beginPath(); CX.arc(o.x, o.y, r, 0, Math.PI * 2); CX.fill();
     });
-
-    if (beat > 0.12 && BG.playing) {
-        const fa = beat * .12 * en;
-        const fg = CX.createRadialGradient(cx, cy * .5, 0, cx, cy, BG_W * .75);
-        fg.addColorStop(0, `hsla(${BG.h},80%,72%,${fa})`);
-        fg.addColorStop(1, `hsla(${BG.h},80%,72%,0)`);
-        CX.fillStyle = fg; CX.fillRect(0, 0, BG_W, BG_H);
-    }
 }
 bgLoop();
 
@@ -650,25 +645,9 @@ function renderParticles() {
 }
 
 let _beatCount = 0;
-/* 박자 효과는 화면에 보이는 카드에만 적용한다. 검색/홈/즐겨찾기 카드 수백 개의 style 을
-   초당 20번 모두 건드리면 스타일 재계산·페인트가 폭증한다. */
-const _visCards = new Set();
-let _cardIO = null;
-function _observeCard(c) {
-    if (!('IntersectionObserver' in window)) return;
-    if (!_cardIO) {
-        _cardIO = new IntersectionObserver(es => {
-            for (const e of es) { if (e.isIntersecting) _visCards.add(e.target); else _visCards.delete(e.target); }
-        }, { rootMargin: '80px' });
-    }
-    _cardIO.observe(c);
-}
-function _beatCards() {
-    if (!_cardIO) return document.querySelectorAll('.card');
-    const out = [];
-    _visCards.forEach(c => { if (c.isConnected) out.push(c); else _visCards.delete(c); });
-    return out;
-}
+/* (카드 박자 효과 제거) 예전에는 모든 카드를 IntersectionObserver 로 영구 관찰했고, 목록을 다시 그릴 때마다
+   분리된(detached) 카드들이 observer 에 계속 붙잡혀 메모리/GC 부하가 시간이 갈수록 쌓였다. 더 이상 필요 없다. */
+function _observeCard(c) { /* no-op */ }
 
 let _lastNpGlow = '', _lastNpCol = '', _npIdleTick = 0, _beatDirty = false, _vbList = null;
 function updateNpColor() {
@@ -722,67 +701,11 @@ function updateNpColor() {
 
     _beatCount++;
 
-    if (S.playing) {
-        if (!_vbList || !_vbList.length) _vbList = document.querySelectorAll('.vb');
-        _vbList.forEach((b, i) => {
-            b.style.background = `hsl(${h},${s}%,62%)`;
-            if (beat > .06) {
-                const ht = 1 + beat * en * (0.8 + Math.sin(i * 1.4 + BG.f * .08) * 0.5);
-                b.style.transform = `scaleY(${ht.toFixed(3)})`;
-            } else b.style.transform = '';
-        });
-    }
-
-    if (S.playing && beat > .04) {
-        _beatDirty = true;
-        _beatCards().forEach((card, ci) => {
-            card.classList.add('beat-active');
-            const isPlaying = card.classList.contains('playing');
-            const phase = Math.sin(BG.f * .06 + ci * 0.72);
-            const jitter = phase * .008 * en;
-            // 가로 스크롤 행(.hrow, .am-chart-row) 안의 카드는 위로 들어올리거나
-            // 크게 확대하면 컨테이너 밖으로 밀려나 잘리므로, 이동 없이 은은한
-            // 확대+글로우만 적용하는 "컨테이너 안전" 버전을 사용한다.
-            if (card._inRow === undefined) card._inRow = !!card.closest('.hrow, .am-chart-row');
-            const inScrollRow = card._inRow;
-            if (isPlaying) {
-                if (inScrollRow) {
-                    const scC = 1 + beat * .022 * en;
-                    const glowPxC = 4 + beat * 12 * en;
-                    const glowAmtC = (.22 + beat * .32 * en).toFixed(3);
-                    card.style.transform = `scale(${scC.toFixed(4)})`;
-                    card.style.boxShadow =
-                        `0 0 0 1.5px var(--acc),` +
-                        `0 ${2 + beat * 3}px ${10 + beat * 8}px rgba(0,0,0,.45),` +
-                        `0 0 ${glowPxC.toFixed(1)}px hsla(${h},${s}%,${l}%,${glowAmtC})`;
-                    card.style.borderColor = `hsla(${h},${s}%,${l}%,${(.5 + beat * .5).toFixed(2)})`;
-                } else {
-                    const sc = 1.028 + beat * .038 * en;
-                    const glowPx = 8 + beat * 28 * en;
-                    const glowAmt = (.18 + beat * .35 * en).toFixed(3);
-                    card.style.transform = `translateY(-7px) scale(${sc.toFixed(4)})`;
-                    card.style.boxShadow =
-                        `0 ${14 + beat * 18}px ${40 + beat * 28}px rgba(0,0,0,.65),` +
-                        `0 0 0 1.5px var(--acc),` +
-                        `0 0 ${glowPx}px ${(glowPx * .4).toFixed(1)}px hsla(${h},${s}%,${l}%,${glowAmt})`;
-                    card.style.borderColor = `hsla(${h},${s}%,${l}%,${(.5 + beat * .5).toFixed(2)})`;
-                }
-            } else if (beat > .15 && en > .3) {
-                const sc2 = 1 + beat * .012 * en + jitter;
-                card.style.transform = `scale(${sc2.toFixed(4)})`;
-                card.style.boxShadow = `0 ${6 + beat * 8}px ${18 + beat * 14}px rgba(0,0,0,${(.3 + beat * .2).toFixed(2)})`;
-                card.style.borderColor = `rgba(255,255,255,${(.07 + beat * .10 * en).toFixed(3)})`;
-            }
-        });
-    } else if (_beatDirty && (!S.playing || beat <= .02)) {
+    if (_beatDirty) {            // 이전 버전이 남겨 둔 인라인 스타일이 있다면 한 번만 정리
         _beatDirty = false;
         document.querySelectorAll('.card.beat-active').forEach(card => {
             card.classList.remove('beat-active');
-            if (!card.matches(':hover')) {
-                card.style.transform = '';
-                card.style.boxShadow = '';
-                card.style.borderColor = '';
-            }
+            card.style.transform = ''; card.style.boxShadow = ''; card.style.borderColor = '';
         });
     }
 }
