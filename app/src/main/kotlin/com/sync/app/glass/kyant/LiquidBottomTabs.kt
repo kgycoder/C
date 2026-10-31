@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastCoerceIn
@@ -64,6 +65,10 @@ fun LiquidBottomTabs(
     tabsCount: Int,
     accentColor: Color,
     modifier: Modifier = Modifier,
+    /** SYNC: 전체 높이(원본 64dp). 안쪽 인디케이터는 항상 height - 8dp. */
+    height: Dp = 64f.dp,
+    /** SYNC: 선택 인디케이터 투명도(0 = 숨김). 검색 화면처럼 어느 탭도 선택되지 않은 상태를 표현한다. */
+    indicatorAlpha: () -> Float = { 1f },
     content: @Composable RowScope.() -> Unit
 ) {
     val isLightTheme = false
@@ -104,7 +109,7 @@ fun LiquidBottomTabs(
                 valueRange = 0f..(tabsCount - 1).toFloat(),
                 visibilityThreshold = 0.001f,
                 initialScale = 1f,
-                pressedScale = 78f / 56f,
+                pressedScale = (height.value + 14f) / (height.value - 8f),
                 onDragStarted = {},
                 onDragStopped = {
                     val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
@@ -178,7 +183,7 @@ fun LiquidBottomTabs(
                     onDrawSurface = { drawRect(containerColor) }
                 )
                 .then(interactiveHighlight.modifier)
-                .height(64f.dp)
+                .height(height)
                 .fillMaxWidth()
                 .padding(4f.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -217,7 +222,7 @@ fun LiquidBottomTabs(
                         onDrawSurface = { drawRect(containerColor) }
                     )
                     .then(interactiveHighlight.modifier)
-                    .height(56f.dp)
+                    .height(height - 8f.dp)
                     .fillMaxWidth()
                     .padding(horizontal = 4f.dp)
                     .graphicsLayer(colorFilter = ColorFilter.tint(accentColor)),
@@ -263,6 +268,7 @@ fun LiquidBottomTabs(
                         )
                     },
                     layerBlock = {
+                        alpha = indicatorAlpha().fastCoerceIn(0f, 1f)
                         scaleX = dampedDragAnimation.scaleX
                         scaleY = dampedDragAnimation.scaleY
                         val velocity = dampedDragAnimation.velocity / 10f
@@ -279,7 +285,7 @@ fun LiquidBottomTabs(
                         drawRect(Color.Black.copy(alpha = 0.03f * progress))
                     }
                 )
-                .height(56f.dp)
+                .height(height - 8f.dp)
                 .fillMaxWidth(1f / tabsCount)
         )
     }
