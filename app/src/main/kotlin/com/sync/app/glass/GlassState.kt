@@ -15,7 +15,9 @@ data class CssRect(val x: Float, val y: Float, val w: Float, val h: Float)
 )
 @Immutable data class BarState(
     val rect: CssRect, val art: String, val title: String, val channel: String,
-    val playing: Boolean, val fav: Boolean, val accent: Long, val progress: Float
+    val playing: Boolean, val fav: Boolean, val accent: Long, val progress: Float,
+    /** true = 아래로 스크롤 중(html.nav-compact): 미니 플레이어가 내비 행 가운데 슬롯으로 합쳐진 상태 */
+    val compact: Boolean = false
 )
 @Immutable data class CtxState(val rect: CssRect, val title: String, val items: List<String>, val newLabel: String)
 @Immutable data class DialogState(
@@ -58,7 +60,8 @@ data class GlassState(
                 bar = o.optJSONObject("bar")?.let {
                     BarState(rect(it), it.optString("art"), it.optString("title"), it.optString("ch"),
                         it.optBoolean("playing"), it.optBoolean("fav"), parseColor(it.optString("accent")),
-                        it.optDouble("prog", 0.0).toFloat().coerceIn(0f, 100f) / 100f)
+                        it.optDouble("prog", 0.0).toFloat().coerceIn(0f, 100f) / 100f,
+                        it.optBoolean("cp"))
                 },
                 ctx = o.optJSONObject("ctx")?.let {
                     CtxState(rect(it), it.optString("title"), strings(it.optJSONArray("items")), it.optString("new"))
