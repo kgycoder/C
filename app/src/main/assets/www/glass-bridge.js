@@ -22,10 +22,12 @@
     const box = r => ({ x: r.left, y: r.top, w: r.width, h: r.height });
 
     /** 요소가 화면에 보이고 다른 UI(예: Now Playing)에 가려져 있지 않은지 */
-    function exposed(el) {
+    function exposed(el, probeLeft) {
         const r = el.getBoundingClientRect();
         if (r.width < 2 || r.height < 2) return false;
-        const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+        // probeLeft: 컴팩트 모드에서는 미니 플레이어가 내비 행의 한가운데를 덮으므로, 내비는 왼쪽 끝(홈 캡슐 자리)에서 판정한다.
+        const cx = probeLeft ? r.left + Math.min(r.height / 2, r.width / 2) : r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
         if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return false;
         const t = document.elementFromPoint(cx, cy);
         if (!t) return false;
@@ -49,6 +51,7 @@
      *    "최종 위치"가 첫 프레임부터 나온다. (이전: 애니메이션 도중 값을 250ms 캐시 → 0.5초 뒤에야 제자리로 정렬)
      *  - 시간 기반 캐시를 없애고 이벤트 기반으로 무효화한다(kick / resize / 애니메이션 종료 / 유휴 시 자가 검증).
      *    → 스크롤 중에는 강제 리플로우가 전혀 일어나지 않는다. */
+    let navCompact = false;
     let geom = null, geomDirty = true, geomTimer = 0;
     function flowMetrics(wrap) {
         const st = wrap.style;
@@ -91,7 +94,7 @@
 
         /* 하단 내비 */
         const nav = $('mob-nav');
-        if (nav && exposed(nav)) {
+        if (nav && exposed(nav, true)) {
             const btns = Array.from(nav.querySelectorAll('.mn-btn'));
             st.nav = { r: box(nav.getBoundingClientRect()), active: Math.max(0, btns.findIndex(b => b.classList.contains('on'))) };
         }
@@ -120,7 +123,8 @@
                 title: txt($('b-title')), ch: txt($('b-ch')),
                 playing: /M118 116/.test(($('cb-play') || {}).innerHTML || ''),
                 fav: !!($('b-fav') && $('b-fav').classList.contains('on')),
-                accent: (typeof _accentColor === 'function' ? _accentColor() : '#fa2d5a')
+                accent: (typeof _accentColor === 'function' ? _accentColor() : '#fa2d5a'),
+                cp: navCompact
             };
         }
 
@@ -203,7 +207,7 @@
             if (!t || t.id === 'bar-prog-fill') continue;
             // 박자 효과(카드 transform/shadow, 비주얼라이저 등)는 글래스 레이아웃과 무관 — closest() 비용도 아낀다
             if (t.classList && (t.classList.contains('card') || t.classList.contains('vb'))) continue;
-            if (t.id === 'np' || t.classList.contains('view') || t.id === 'bar') { if (t.id === 'np') syncNpLock(); once = true; continue; }
+            if (t.id === 'np' || t.classList.contains('view') || t.id === 'bar') { if (t.id === 'np') syncNpLock(); if (t.id === 'bar' || t.id === 'np') trackCompact(); once = true; continue; }
             if (t.closest) {
                 if (t.closest(OVERLAYS)) { burst = true; break; }
                 if (t.closest(HOSTS)) once = true;
@@ -220,14 +224,45 @@
        ※ 예전에는 scroll 이벤트마다 GlassBridge.scroll() 을 호출했는데, JavascriptInterface 호출은 렌더러 메인 스레드를
          막는 동기 IPC 라서 스크롤 프레임 드롭의 원인이 되었다 → 제거.
        여기서는 "스크롤 중인지"만 타임스탬프로 기록(호출 비용 0)해서, 스크롤 중에는 안전망 측정을 건너뛴다. */
+    /* ── 스크롤 방향에 따른 하단 UI 컴팩트 전환 (Apple Music 스타일) ──
+       음악 재생 중(미니 플레이어 표시) 아래로 스크롤하면 html.nav-compact 를 켠다.
+       → CSS 가 #bar 의 최종 위치를 내비 행 가운데로 옮기고, 네이티브(Compose)가 그 변화를 스프링으로 따라가며
+         "블룹" 모핑을 그린다. 다시 위로 스크롤하면 해제되어 원래 배치로 돌아간다.
+       스크롤 이벤트(passive)에서 숫자 몇 개만 비교하므로 비용이 거의 없고, 클래스는 실제로 바뀔 때만 건드린다. */
+    const portraitMQ = window.matchMedia ? window.matchMedia('(orientation: portrait)') : null;
+    let lastY = window.scrollY || 0, scrollAcc = 0;
+    function setCompact(v) {
+        v = !!v;
+        if (v === navCompact) return;
+        navCompact = v;
+        document.documentElement.classList.toggle('nav-compact', v);
+        kick(500);
+    }
+    function trackCompact() {
+        const y = window.scrollY || 0;
+        const dy = y - lastY;
+        lastY = y;
+        const b = $('bar');
+        if (!b || b.classList.contains('bar-hidden') || (portraitMQ && !portraitMQ.matches) || document.documentElement.classList.contains('np-open')) {
+            scrollAcc = 0; setCompact(false); return;
+        }
+        if (y < 24) { scrollAcc = 0; setCompact(false); return; }
+        if (dy === 0) return;
+        if ((dy > 0) !== (scrollAcc > 0)) scrollAcc = 0;      // 방향이 바뀌면 누적 초기화
+        scrollAcc += dy;
+        if (scrollAcc > 28) setCompact(true);
+        else if (scrollAcc < -16) setCompact(false);
+    }
+
     let lastScroll = 0;
     let settleT = 0;
     window.addEventListener('scroll', () => {
+        trackCompact();
         lastScroll = performance.now();
         clearTimeout(settleT);       // 스크롤이 멈추면 딱 한 번 "확정 스크롤 값"을 네이티브에 알려 마지막 어긋남을 복구
         settleT = setTimeout(() => { try { window.GlassBridge.settled(window.scrollY || 0); } catch (e) {} }, 150);
     }, { passive: true });
-    ['resize', 'orientationchange'].forEach(e => window.addEventListener(e, () => kick(400), { passive: true }));
+    ['resize', 'orientationchange'].forEach(e => window.addEventListener(e, () => { trackCompact(); kick(400); }, { passive: true }));
     /* 박자 효과로 계속 일어나는 카드/비주얼라이저의 transition·animation 종료는 레이아웃을 바꾸지 않으므로
        무시한다 (재생 중 kick → 프레임마다 collect()+JSON.stringify 가 반복되던 부하 제거). */
     const BEAT_FX = '.card, #vizz, #np-pulse, #np-particles, .c-now-bar';
@@ -258,6 +293,7 @@
                 case 'nav': {
                     const b = document.querySelector('#mob-nav .mn-btn[data-v="' + c.v + '"]');
                     if (b) b.click();
+                    scrollAcc = 0; lastY = window.scrollY || 0; setCompact(false);
                     break;
                 }
                 case 'bar': {
