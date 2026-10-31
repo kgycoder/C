@@ -26,6 +26,9 @@ import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
@@ -65,7 +68,7 @@ fun GlassRoot(webView: WebView, c: GlassController) {
         val chromeAlpha by animateFloatAsState(if (dim) 0.45f else 1f, label = "chromeDim")
 
         Box(if (chromeAlpha < 0.999f) Modifier.fillMaxSize().graphicsLayer { alpha = chromeAlpha } else Modifier.fillMaxSize()) {
-            s.nav?.let { NavGlass(it, backdrop, c) }
+            s.nav?.let { NavGlass(it, s.bar, backdrop, c) }
             s.bar?.let { BarGlass(it, backdrop, c) }
             s.search?.let { SearchGlass(it, backdrop, c) }
         }
@@ -107,6 +110,27 @@ internal fun DrawScope.searchDrawDelta(c: GlassController, s: SearchState, place
 internal fun Modifier.cssRect(r: CssRect): Modifier = this
     .offset { IntOffset((r.x * density).roundToInt(), (r.y * density).roundToInt()) }
     .size(r.w.dp, r.h.dp)
+
+/** px 단위 사각형 (애니메이션 중인 값으로 매 프레임 계산) */
+internal class PxRect(@JvmField val x: Float, @JvmField val y: Float, @JvmField val w: Float, @JvmField val h: Float)
+
+/**
+ * 위치·크기를 "레이아웃 단계에서" 매 프레임 계산하는 [cssRect] 의 애니메이션 버전.
+ * [rect] 안에서 읽은 Animatable/State 값은 리컴포지션이 아니라 레이아웃만 다시 실행시키므로,
+ * 스프링으로 크기/위치가 변하는 블룹 모핑 동안에도 컴포지션 비용이 0이다.
+ */
+internal fun Modifier.liveRect(rect: Density.() -> PxRect): Modifier = this
+    .offset {
+        val q = rect()
+        IntOffset(q.x.roundToInt(), q.y.roundToInt())
+    }
+    .layout { measurable, _ ->
+        val q = rect()
+        val w = q.w.roundToInt().coerceAtLeast(1)
+        val h = q.h.roundToInt().coerceAtLeast(1)
+        val placeable = measurable.measure(Constraints.fixed(w, h))
+        layout(w, h) { placeable.place(0, 0) }
+    }
 
 /** Pop-in spring used by dialogs / menus (scale + alpha through the backdrop's own layerBlock). */
 @Composable
