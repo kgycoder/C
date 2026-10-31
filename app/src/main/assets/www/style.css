@@ -5404,3 +5404,91 @@ html.bg-mode *, html.bg-mode *::before, html.bg-mode *::after {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
 }
+
+
+/* ════════════════════════════════════════════════════════
+   PERFORMANCE + APPLE MUSIC STYLE BOTTOM UI (v2)
+   - 전체 화면 blur(120px) / 카드별 backdrop-filter / 카드 will-change 제거
+   - 하단 내비: [탭 캡슐(홈·즐겨찾기·대기열·플레이리스트)] + [검색 단일 캡슐]
+   - 재생 중 아래로 스크롤하면 html.nav-compact → 미니 플레이어가 내비 행 가운데로 합쳐진다.
+   (유리 표면 자체는 네이티브 Compose 가 그린다. 여기서는 DOM 의 \"위치 기준 박스\"와 비용만 정리한다.)
+════════════════════════════════════════════════════════ */
+
+/* ① 전체 화면 backdrop blur 제거: 화면 전체를 120px 로 매 프레임 다시 흐리던 가장 큰 GPU 비용.
+      배경 캔버스가 이미 부드러운 래디얼 그라디언트라 시각 차이가 거의 없다. 레이어 자체를 없앤다. */
+.bg-over {
+    display: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+/* ② 카드별 backdrop-filter 제거 (카드 수백 개 × 매 프레임 블러 → 스크롤/재생 시간이 길수록 FPS 하락).
+      같은 느낌이 나도록 불투명도를 살짝 올린 단색 배경으로 대체. */
+.card,
+.card *,
+.c-fav,
+.c-dur,
+.c-pl-add,
+.srch-inp,
+.sug-drop,
+.glass-panel,
+#toast {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+.c-fav,
+.c-pl-add { background: rgba(14, 14, 20, .66); }
+.c-dur    { background: rgba(10, 10, 16, .78); }
+.sug-drop { background: rgba(14, 14, 24, .985); }
+.glass-panel { background: rgba(255, 255, 255, .075); }
+
+/* ③ 카드 레이어 승격(will-change)과 박자 전용 클래스 제거: 카드마다 GPU 레이어를 만들어
+      메모리/합성 비용이 목록 길이에 비례해 늘어나던 문제. 호버/탭 때만 브라우저가 알아서 승격한다. */
+.card { will-change: auto; }
+
+/* ④ 무한 반복 애니메이션 중 화면에 보이지 않는 것(미니바 비주얼라이저)은 아예 렌더링하지 않는다. */
+#bar .vizz, #bar .vizz .vb { animation: none !important; display: none !important; }
+
+/* ⑤ 하단 UI 크기/배치 (세로 모드): 내비 높이를 줄이고, 미니 플레이어도 같은 비율(0.9)로 줄인다.
+      내비 54px / 미니 플레이어 58px / 둘 사이 8px / 바닥 여백 12px */
+@media (orientation: portrait) {
+    html.glass-native {
+        --nav-h: 66px;      /* 54 + 12(바닥 여백) */
+        --mini-h: 68px;     /* 58 + 10 */
+    }
+
+    html.glass-native #mob-nav {
+        left: 16px;
+        right: 16px;
+        bottom: calc(var(--safe-bot) + 12px);
+        height: 54px;
+        border-radius: 27px;
+        pointer-events: auto;          /* 내비 컨테이너만 히트 테스트(exposed)에 잡히게 */
+    }
+    /* 버튼 클릭은 네이티브가 app.js 로 직접 전달한다. 컴팩트 모드에서 보이지 않는 DOM 버튼이
+       탭을 가로채 화면이 이동해 버리는 것을 막는다. */
+    html.glass-native #mob-nav .mn-btn { pointer-events: none; }
+
+    html.glass-native #bar {
+        left: 16px;
+        right: 16px;
+        bottom: calc(var(--nav-h) + var(--safe-bot) + 8px);
+        height: 58px;
+        border-radius: 29px;
+        z-index: 210;                  /* 컴팩트 모드에서 내비 행 위에 놓인다 */
+    }
+    html.glass-native #bar .bar-inner { height: 58px; padding: 8px 4px 8px 9px; }
+
+    /* 컴팩트(= 아래로 스크롤 중 + 재생 중): 미니 플레이어가 내비 행의 가운데 슬롯으로 들어간다.
+       좌우 62px = 원형 캡슐 54px + 간격 8px. 위치 전환은 DOM 에서 즉시 일어나고,
+       네이티브가 스프링으로 따라가며 부드러운 블룹 모핑을 만든다. */
+    html.glass-native.nav-compact #bar {
+        left: calc(16px + 62px);
+        right: calc(16px + 62px);
+        bottom: calc(var(--safe-bot) + 12px);
+        height: 54px;
+        border-radius: 27px;
+    }
+    html.glass-native.nav-compact #bar .bar-inner { height: 54px; padding: 10px 4px 10px 10px; }
+}
